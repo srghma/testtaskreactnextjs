@@ -1,11 +1,29 @@
-import { FlatCompat } from "@eslint/eslintrc";
-const compat = new FlatCompat({
-  // import.meta.dirname is available after Node.js v20.11.0
-  baseDirectory: import.meta.dirname,
-});
-const eslintConfig = [
-  ...compat.config({
-    extends: ["next/core-web-vitals"],
-  }),
-];
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+import prettier from "eslint-config-prettier/flat";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  prettier,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    "dist/**",
+    ".open-next/**",
+  ]),
+  {
+    settings: {
+      react: {
+        version: "19.2", // Set this to your actual React version (e.g., "18.3", "19.0")
+      },
+    },
+  },
+]);
+
 export default eslintConfig;

@@ -1,22 +1,24 @@
 "use server";
 import { v4 as uuidv4 } from "uuid";
 import { insertJob, getJob, getAllJobs } from "../db";
-import { processJobPipeline } from "../pipeline";
-import { JobState } from "../types";
-import { numberToValidPercentOrUndefined } from "../fp";
+import { JobState, JobId } from "../types";
+import { createAdminClient } from "@/supabase/admin";
+import {
+  numberToValidPercentOrUndefined,
+  ValidPercent,
+} from "@/utils/toNumber/validPercent";
 
 export async function createJobAction() {
-  const jobId = uuidv4();
-  await insertJob(jobId, "queued", 0);
-
-  // start processing in background
-  processJobPipeline(jobId).catch(console.error);
+  const jobId = uuidv4() as JobId;
+  const supabase = createAdminClient();
+  await insertJob(supabase, jobId, "queued", null);
 
   return jobId;
 }
 
-export async function getJobAction(jobId: string): Promise<JobState | null> {
-  const row = await getJob(jobId);
+export async function getJobAction(jobId: JobId): Promise<JobState | null> {
+  const supabase = createAdminClient();
+  const row = await getJob(supabase, jobId);
   if (!row) return null;
 
   switch (row.status) {
@@ -25,7 +27,8 @@ export async function getJobAction(jobId: string): Promise<JobState | null> {
     case "processing":
       return {
         t: "processing",
-        progress: numberToValidPercentOrUndefined(row.progress) || (0 as any),
+        progress:
+          numberToValidPercentOrUndefined(row.progress) || (0 as ValidPercent),
       };
     case "done":
       return { t: "done", result: row.result };
@@ -37,7 +40,8 @@ export async function getJobAction(jobId: string): Promise<JobState | null> {
 }
 
 export async function getAllJobsAction() {
-  const rows = await getAllJobs();
+  const supabase = createAdminClient();
+  const rows = await getAllJobs(supabase);
   return rows.map((row) => ({
     id: row.id,
     status: row.status,

@@ -1,9 +1,12 @@
-import { supabase } from "./supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { JobId, JobStatus } from "./types";
+import { ValidPercent } from "./utils/toNumber/validPercent";
 
 export const insertJob = async (
-  id: string,
-  status: string,
-  progress: number,
+  supabase: SupabaseClient,
+  id: JobId,
+  status: JobStatus,
+  progress: ValidPercent | null,
 ) => {
   const { error } = await supabase
     .from("jobs")
@@ -11,7 +14,7 @@ export const insertJob = async (
   if (error) console.error("Insert Job Error:", error);
 };
 
-export const getJob = async (id: string) => {
+export const getJob = async (supabase: SupabaseClient, id: JobId) => {
   const { data, error } = await supabase
     .from("jobs")
     .select("*")
@@ -24,7 +27,7 @@ export const getJob = async (id: string) => {
   return data;
 };
 
-export const getAllJobs = async () => {
+export const getAllJobs = async (supabase: SupabaseClient) => {
   const { data, error } = await supabase
     .from("jobs")
     .select("*")
@@ -36,22 +39,15 @@ export const getAllJobs = async () => {
   return data;
 };
 
-export const updateJobProgress = async (progress: number, id: string) => {
-  const { error } = await supabase
-    .from("jobs")
-    .update({ progress })
-    .eq("id", id);
-  if (error) console.error("Update Progress Error:", error);
-};
-
-export const updateJobStatus = async (
-  status: string,
-  result: string | null,
-  id: string,
+export const updateJob = async (
+  supabase: SupabaseClient,
+  id: JobId,
+  updates: {
+    status?: JobStatus;
+    progress?: ValidPercent | null;
+    result?: string | null;
+  },
 ) => {
-  const { error } = await supabase
-    .from("jobs")
-    .update({ status, result })
-    .eq("id", id);
-  if (error) console.error("Update Status Error:", error);
+  const { error } = await supabase.from("jobs").update(updates).eq("id", id);
+  if (error) console.error("Update Job Error:", error);
 };

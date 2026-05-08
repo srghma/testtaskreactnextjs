@@ -1,0 +1,679 @@
+// Copyright 2025 srghma
+
+import { type Option } from "./types.js";
+
+export function Map_every<K, V>(
+  map: ReadonlyMap<K, V>,
+  predicate: (k: K, v: V) => boolean,
+): boolean {
+  for (const [k, v] of map) {
+    if (!predicate(k, v)) return false;
+  }
+  return true;
+}
+
+export function Map_keysToSet<K extends string, V>(
+  map: ReadonlyMap<K, V>,
+): Set<K> {
+  return new Set(map.keys());
+}
+
+export function Map_entriesToArray<K, V, R>(
+  map: ReadonlyMap<K, V>,
+  fn: (key: K, value: V, index: number) => R,
+): R[] {
+  const size = map.size;
+  const result = new Array<R>(size);
+  let i = 0;
+  for (const [k, v] of map) {
+    result[i] = fn(k, v, i);
+    i++;
+  }
+  return result;
+}
+
+export function Map_entriesToRecord<K extends PropertyKey, V, R>(
+  map: ReadonlyMap<K, V>,
+  fn: (key: K, value: V) => R,
+): Record<K, R> {
+  const result = {} as Record<K, R>;
+  for (const [k, v] of map) {
+    result[k] = fn(k, v);
+  }
+  return result;
+}
+
+export function Map_entriesMapToArray_unlessUndefined<K, V, R>(
+  map: ReadonlyMap<K, V>,
+  fn: (key: K, value: V) => R | undefined,
+): R[] {
+  const result: R[] = [];
+  for (const [key, value] of map) {
+    const item = fn(key, value);
+    if (item) result.push(item);
+  }
+  return result;
+}
+
+export function Map_entriesFlatMapToArray<K, V, R>(
+  map: ReadonlyMap<K, V>,
+  fn: (key: K, value: V) => readonly R[],
+): R[] {
+  // return Array.from(map.entries()).flatMap(([key, value]: [K, V]) => fn(key, value))
+  const result: R[] = [];
+  for (const [key, value] of map) {
+    const items = fn(key, value);
+    // Push each item into result individually to avoid extra intermediate arrays
+    for (const item of items) {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+export function Map_find<K, V>(
+  map: ReadonlyMap<K, V>,
+  predicate: (k: K, v: V) => boolean,
+): [K, V] | undefined {
+  for (const entry of map) if (predicate(entry[0], entry[1])) return entry;
+  return undefined;
+}
+
+export function Map_getOr<K, V>(
+  map: ReadonlyMap<K, V>,
+  key: K,
+  defaultValue: V,
+): V {
+  const value = map.get(key);
+  // If the value is undefined, we check if the key actually exists
+  // (to handle cases where V includes undefined)
+  if (value === undefined && !map.has(key)) {
+    return defaultValue;
+  }
+  return value as V;
+}
+
+export function Map_union_onCollisionThrow<K, V>(
+  ...maps: readonly ReadonlyMap<K, V>[]
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const map of maps) {
+    for (const [k, v] of map) {
+      if (result.has(k))
+        throw new Error(`Map union collision on key: ${String(k)}`);
+      result.set(k, v);
+    }
+  }
+  return result;
+}
+
+// similar to Map_mkSemigroupArray, but with custom merge function
+export function Map_union_onCollisionMerge<K, V>(
+  mergeCollision: (a: V, b: V) => V,
+  ...maps: readonly ReadonlyMap<K, V>[]
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const map of maps) {
+    for (const [k, v] of map) {
+      const existing = result.get(k);
+      if (existing !== undefined || result.has(k)) {
+        result.set(k, mergeCollision(existing!, v));
+      } else {
+        result.set(k, v);
+      }
+    }
+  }
+  return result;
+}
+
+export function Map_union_onCollisionPreferFirst<K, V>(
+  ...maps: readonly ReadonlyMap<K, V>[]
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const map of maps) {
+    for (const [k, v] of map) {
+      if (!result.has(k)) result.set(k, v);
+    }
+  }
+  return result;
+}
+
+export function Map_union_onCollisionPreferLast<K, V>(
+  ...maps: readonly ReadonlyMap<K, V>[]
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const map of maps) {
+    for (const [k, v] of map) result.set(k, v);
+  }
+  return result;
+}
+
+export function Map_intersection<K, V>(
+  mapA: ReadonlyMap<K, V>,
+  mapB: ReadonlyMap<K, V>,
+  merge?: (a: V, b: V) => V,
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const [k, v] of mapA) {
+    if (mapB.has(k)) {
+      result.set(k, merge ? merge(v, mapB.get(k)!) : v);
+    }
+  }
+  return result;
+}
+
+export function Map_difference<K, V>(
+  mapA: ReadonlyMap<K, V>,
+  mapB: ReadonlyMap<K, V>,
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const [k, v] of mapA) {
+    if (!mapB.has(k)) result.set(k, v);
+  }
+  return result;
+}
+
+/**
+ * @example
+ * const users = new Map<number, { name: string; role: string }>([
+ *   [1, { name: 'Alice', role: 'admin' }],
+ *   [2, { name: 'Bob', role: 'user' }],
+ *   [3, { name: 'Charlie', role: 'admin' }],
+ *   [4, { name: 'David', role: 'user' }],
+ * ]);
+ *
+ * const grouped = Map_groupBy(users, (_, user) => user.role);
+ *
+ * // Result:
+ * // Map {
+ * //   'admin' => Map { 1 => {name: 'Alice', ...}, 3 => {name: 'Charlie', ...} },
+ * //   'user' => Map { 2 => {name: 'Bob', ...}, 4 => {name: 'David', ...} }
+ * // }
+ */
+export function Map_groupBy<K, V, G>(
+  input: ReadonlyMap<K, V>,
+  fn: (key: K, value: V) => G,
+): Map<G, Map<K, V>> {
+  const result = new Map<G, Map<K, V>>();
+  for (const [k, v] of input) {
+    const groupKey = fn(k, v);
+    if (!result.has(groupKey)) {
+      result.set(groupKey, new Map());
+    }
+    result.get(groupKey)!.set(k, v);
+  }
+  return result;
+}
+
+export function Map_some<K, V>(
+  map: ReadonlyMap<K, V>,
+  predicate: (k: K, v: V) => boolean,
+): boolean {
+  for (const [k, v] of map) if (predicate(k, v)) return true;
+  return false;
+}
+
+export function Map_none<K, V>(
+  map: ReadonlyMap<K, V>,
+  predicate: (k: K, v: V) => boolean,
+): boolean {
+  return !Map_some(map, predicate);
+}
+
+/**
+ * Filters and maps a Map in one pass using Option.
+ * - If the callback returns Option_none, the entry is skipped.
+ * - If it returns Option_some, the transformed value is kept.
+ */
+export function Map_filterMap<K, V, U>(
+  map: ReadonlyMap<K, V>,
+  f: (key: K, value: V) => Option<U>,
+): Map<K, U> {
+  const result = new Map<K, U>();
+  for (const [k, v] of map) {
+    const opt = f(k, v);
+    if (opt.t === "some") {
+      result.set(k, opt.v);
+    }
+  }
+  return result;
+}
+
+export function Map_filter<K extends string, V>(
+  map: ReadonlyMap<K, V>,
+  predicate: (key: K, value: V) => boolean,
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const [k, v] of map) {
+    if (predicate(k, v)) {
+      result.set(k, v);
+    }
+  }
+  return result;
+}
+
+export function Map_filterKeys<K, V>(
+  map: ReadonlyMap<K, V>,
+  predicate: (key: K, value: V) => boolean,
+): Set<K> {
+  const result = new Set<K>();
+  for (const [k, v] of map) {
+    if (predicate(k, v)) {
+      result.add(k);
+    }
+  }
+  return result;
+}
+
+export function Map_mapKeys<K, V, J>(
+  map: ReadonlyMap<K, V>,
+  f: (key: K, value: V) => J,
+): Map<J, V> {
+  const result = new Map<J, V>();
+  for (const [k, v] of map) {
+    result.set(f(k, v), v);
+  }
+  return result;
+}
+
+export function Map_mapValues<K, V, U>(
+  inputMap: ReadonlyMap<K, V>,
+  fn: (key: K, value: V) => U,
+): Map<K, U> {
+  const result = new Map<K, U>();
+  for (const [key, value] of inputMap) {
+    result.set(key, fn(key, value));
+  }
+  return result;
+}
+
+export function Map_partition<K, V>(
+  map: ReadonlyMap<K, V>,
+  predicate: (key: K, value: V) => boolean,
+): [Map<K, V>, Map<K, V>] {
+  const yes = new Map<K, V>();
+  const no = new Map<K, V>();
+  for (const [k, v] of map) {
+    const s = predicate(k, v) ? yes : no;
+    s.set(k, v);
+  }
+  return [yes, no];
+}
+
+/**
+ * Build a Map from entries [K, V] but merge duplicate keys into arrays of values
+ * @param entries Array of [K, V]
+ * @returns Map<K, V[]>
+ */
+export function Map_mkSemigroupArray<K, V>(
+  entries: readonly (readonly [K, V])[],
+): Map<K, V[]> {
+  const map = new Map<K, V[]>();
+  for (let i = 0; i < entries.length; i++) {
+    const [key, value] = entries[i]!;
+    let arr = map.get(key);
+    if (arr === undefined) {
+      arr = [];
+      map.set(key, arr);
+    }
+    arr.push(value); // O(1) instead of O(N) spread
+  }
+  return map;
+}
+
+export function Map_mkOrThrowIfDuplicateKeys<K, V>(
+  entries: readonly (readonly [K, V])[],
+): Map<K, V> {
+  const map = new Map<K, V>();
+  const duplicates = new Set<K>();
+
+  for (const [key, value] of entries) {
+    if (map.has(key)) {
+      duplicates.add(key);
+    } else {
+      map.set(key, value);
+    }
+  }
+
+  if (duplicates.size > 0) {
+    throw new Error(`Duplicate keys found: ${[...duplicates].join(", ")}`);
+  }
+
+  return map;
+}
+
+export function zipMaps<K, A, B>(
+  mapA: ReadonlyMap<K, A>,
+  mapB: ReadonlyMap<K, B>,
+): [Map<K, [A, B]>, Map<K, A>, Map<K, B>] {
+  const zipped = new Map<K, [A, B]>();
+  const leftoversA = new Map<K, A>();
+  const leftoversB = new Map(mapB); // We only need to clone B
+
+  for (const [k, vA] of mapA) {
+    const vB = leftoversB.get(k);
+    if (vB !== undefined || leftoversB.has(k)) {
+      zipped.set(k, [vA, vB!]);
+      leftoversB.delete(k); // Remove from B so only leftovers remain
+    } else {
+      leftoversA.set(k, vA);
+    }
+  }
+  return [zipped, leftoversA, leftoversB];
+}
+
+// Strict version: throws if either map has leftovers
+export function zipMapsStrict<K, A, B>(
+  mapA: ReadonlyMap<K, A>,
+  mapB: ReadonlyMap<K, B>,
+): Map<K, [A, B]> {
+  const [zipped, leftoversA, leftoversB] = zipMaps(mapA, mapB);
+
+  if (leftoversA.size > 0) {
+    throw new Error(
+      `Keys missing in second map: ${Array.from(leftoversA.keys()).join(", ")}`,
+    );
+  }
+
+  if (leftoversB.size > 0) {
+    throw new Error(
+      `Keys missing in first map: ${Array.from(leftoversB.keys()).join(", ")}`,
+    );
+  }
+
+  return zipped;
+}
+
+export function zipMapsLeftIsSubsetOfRight<K extends string, A, B>(
+  mapA: ReadonlyMap<K, A>,
+  mapB: ReadonlyMap<K, B>,
+): Map<K, [A, B]> {
+  // FIXME: dont use this method, sh return leftoversB
+  const [zipped, leftoversA] = zipMaps(mapA, mapB);
+
+  if (leftoversA.size > 0) {
+    throw new Error(
+      `zipMapsLeftIsSubsetOfRight: Key(s) missing in second map: ${Array.from(leftoversA.keys()).join(", ")}`,
+    );
+  }
+
+  return zipped;
+}
+
+//////////////////////
+
+export function zipMaps3<K, A, B, C>(
+  mapA: ReadonlyMap<K, A>,
+  mapB: ReadonlyMap<K, B>,
+  mapC: ReadonlyMap<K, C>,
+): [Map<K, [A, B, C]>, Map<K, A>, Map<K, B>, Map<K, C>] {
+  const zipped = new Map<K, [A, B, C]>();
+  const leftoversA = new Map(mapA);
+  const leftoversB = new Map(mapB);
+  const leftoversC = new Map(mapC);
+
+  for (const [key, valueA] of mapA) {
+    const valueB = mapB.get(key);
+    const valueC = mapC.get(key);
+    if (valueB !== undefined && valueC !== undefined) {
+      zipped.set(key, [valueA, valueB, valueC]);
+      leftoversA.delete(key);
+      leftoversB.delete(key);
+      leftoversC.delete(key);
+    }
+  }
+
+  return [zipped, leftoversA, leftoversB, leftoversC];
+}
+
+export function zipMaps3Strict<K, A, B, C>(
+  mapA: ReadonlyMap<K, A>,
+  mapB: ReadonlyMap<K, B>,
+  mapC: ReadonlyMap<K, C>,
+): Map<K, [A, B, C]> {
+  const [zipped, leftoversA, leftoversB, leftoversC] = zipMaps3(
+    mapA,
+    mapB,
+    mapC,
+  );
+
+  if (leftoversA.size > 0 || leftoversB.size > 0 || leftoversC.size > 0) {
+    throw new Error(
+      `zipMaps3Strict: maps must have identical keys. ` +
+        `Missing or extra keys → ` +
+        `A: [${Array.from(leftoversA.keys()).join(", ")}], ` +
+        `B: [${Array.from(leftoversB.keys()).join(", ")}], ` +
+        `C: [${Array.from(leftoversC.keys()).join(", ")}]`,
+    );
+  }
+
+  return zipped;
+}
+
+// Will throw if invariant keys(A) ⊆ keys(B) ⊆ keys(C) breaks
+export function zipMaps3_left_lessThan_middle_lessThan_right<K, A, B, C>(
+  mapA: ReadonlyMap<K, A>,
+  mapB: ReadonlyMap<K, B>,
+  mapC: ReadonlyMap<K, C>,
+): Map<K, [A, B, C]> {
+  // FIXME: dont use this method, sh return leftoversB
+  const [zipped, leftoversA, leftoversB] = zipMaps3(mapA, mapB, mapC);
+
+  if (leftoversA.size > 0) {
+    throw new Error(
+      `zipMaps3_left_lessThan_middle_lessThan_right: keys in A missing in B or C: ${Array.from(
+        leftoversA.keys(),
+      ).join(", ")}`,
+    );
+  }
+
+  // now ensure B ⊆ C (but allow B to have keys not in A)
+  if (leftoversB.size > 0) {
+    throw new Error(
+      `zipMaps3_left_lessThan_middle_lessThan_right: keys in B missing in C: ${Array.from(
+        leftoversB.keys(),
+      ).join(", ")}`,
+    );
+  }
+
+  // leftoverC can exist → that's fine (C is allowed to be a superset)
+  return zipped;
+}
+
+export function Map_getFirstEntry<K, V>(
+  map: ReadonlyMap<K, V>,
+): [K, V] | undefined {
+  const iterator = map.entries().next();
+  if (iterator.done) return undefined;
+  return iterator.value;
+}
+
+export function Map_getFirstKey<K, V>(map: ReadonlyMap<K, V>): K | undefined {
+  const iterator = map.keys().next();
+  if (iterator.done) return undefined;
+  return iterator.value;
+}
+
+export function Map_mergeWithRecord<K extends PropertyKey, V1, V2, V3>(
+  primary: ReadonlyMap<K, V1>,
+  secondary: Readonly<Record<K, V2>>,
+  merge: (v1: V1, v2: V2 | undefined) => V3,
+): Map<K, V3> {
+  const result = new Map<K, V3>();
+  // .forEach is the fastest way to iterate a Map if you don't need to break
+  primary.forEach((v1, k) => {
+    result.set(k, merge(v1, secondary[k]));
+  });
+  return result;
+}
+
+export function Map_sortBy<K, V, B>(
+  primary: ReadonlyMap<K, V>,
+  by: (k: K, v: V) => B,
+): Map<K, V> {
+  const size = primary.size;
+  if (size === 0) return new Map();
+
+  // 1. Decorate: Pre-calculate the sort criteria (O(N))
+  // We use a pre-allocated array for better performance in V8
+  const decorated = new Array<{ k: K; v: V; criteria: B }>(size);
+
+  let i = 0;
+  for (const [k, v] of primary) {
+    decorated[i++] = { k, v, criteria: by(k, v) };
+  }
+
+  // 2. Sort: Compare the pre-calculated criteria (O(N log N))
+  decorated.sort((a, b) => {
+    const valA = a.criteria;
+    const valB = b.criteria;
+    if (valA < valB) return -1;
+    if (valA > valB) return 1;
+    return 0;
+  });
+
+  // 3. Undecorate: Build the resulting Map (O(N))
+  const result = new Map<K, V>();
+  for (let j = 0; j < size; j++) {
+    const item = decorated[j]!;
+    result.set(item.k, item.v);
+  }
+
+  return result;
+}
+
+// export function Map_moveIndexToStart_iterator_based<K, V>(map: ReadonlyMap<K, V>, index: number): Map<K, V> {
+//   if (index < 0) throw new Error('Invalid index: cannot be less than zero')
+//   if (index >= map.size) throw new Error('Invalid index: cannot be more than map size')
+//   if (index === 0) throw new Error('Invalid index: cannot be zero, bc noop')
+//
+//   const result = new Map<K, V>()
+//
+//   let i = 0
+//   let movedEntry: [K, V] | undefined
+//
+//   for (const entry of map) {
+//     if (i === index) {
+//       movedEntry = entry
+//     } else {
+//       result.set(entry[0], entry[1])
+//     }
+//     i++
+//   }
+//
+//   // moved entry must exist because of bounds check
+//   const [k, v] = movedEntry!
+//   const final = new Map<K, V>()
+//   final.set(k, v)
+//
+//   for (const [kk, vv] of result) {
+//     final.set(kk, vv)
+//   }
+//
+//   return final
+// }
+
+export function Map_moveIndexToStart_arrayBased<K, V>(
+  map: ReadonlyMap<K, V>,
+  index: number,
+): Map<K, V> {
+  if (index < 0) throw new Error("Invalid index: cannot be less than zero");
+  if (index >= map.size)
+    throw new Error("Invalid index: cannot be more than map size");
+  if (index === 0) throw new Error("Invalid index: cannot be zero, bc noop");
+
+  const entries = Array.from(map.entries());
+  const [entry] = entries.splice(index, 1);
+
+  return new Map([entry!, ...entries]);
+}
+
+// export function Map_moveIndexToStart_mut<K, V>(map: Map<K, V>, index: number): void {
+//   if (index < 0) throw new Error('Invalid index: cannot be less than zero')
+//   if (index >= map.size) throw new Error('Invalid index: cannot be more than map size')
+//   if (index === 0) throw new Error('Invalid index: cannot be zero, bc noop')
+//
+//   let i = 0
+//   let target: [K, V] | undefined
+//
+//   for (const entry of map) {
+//     if (i === index) {
+//       target = entry
+//       break
+//     }
+//     i++
+//   }
+//
+//   const [k, v] = target!
+//   map.delete(k)
+//
+//   const rebuilt = new Map<K, V>()
+//   rebuilt.set(k, v)
+//   for (const e of map) rebuilt.set(e[0], e[1])
+//
+//   map.clear()
+//   for (const e of rebuilt) map.set(e[0], e[1])
+// }
+
+export function Map_sortStringKeys<K extends PropertyKey, V>(
+  map: ReadonlyMap<K, V>,
+): Map<K, V> {
+  const sorted = Array.from(map.entries()).sort((a, b) =>
+    String(a[0]).localeCompare(String(b[0])),
+  );
+  return new Map(sorted);
+}
+
+/**
+ * Creates a new Map containing only the keys present in the provided array.
+ * Iterates over the array to ensure O(N) where N is the number of keys to pick.
+ */
+export function Map_intersectionWithArray<K, V>(
+  map: ReadonlyMap<K, V>,
+  keys: readonly K[],
+): Map<K, V> {
+  const result = new Map<K, V>();
+  for (const key of keys) {
+    const value = map.get(key);
+    // Check .has() to correctly handle cases where the value itself is 'undefined'
+    if (value !== undefined || map.has(key)) {
+      result.set(key, value!);
+    }
+  }
+  return result;
+}
+
+/**
+ * Splits a Map based on an Array of keys into three parts:
+ * 1. intersected: Entries where the key exists in both the Map and the Array.
+ * 2. missingKeys: Keys present in the Array but not found in the Map.
+ * 3. leftoversFromMap: Entries present in the Map whose keys were NOT in the Array.
+ */
+export function Map_intersectionWithArray_vennDiagram<K, V>(
+  map: ReadonlyMap<K, V>,
+  keys: readonly K[],
+): [Map<K, V>, Map<K, V>, K[]] {
+  const intersected = new Map<K, V>();
+  const missingKeys: K[] = [];
+  const leftoversFromMap = new Map(map);
+
+  // We use a Set to handle duplicate keys in the input 'keys' array
+  // to prevent them from being counted as 'missing' once deleted from leftovers
+  const processedKeys = new Set<K>();
+
+  for (const key of keys) {
+    if (processedKeys.has(key)) continue;
+    processedKeys.add(key);
+
+    const value = leftoversFromMap.get(key);
+
+    if (value !== undefined || leftoversFromMap.has(key)) {
+      intersected.set(key, value as V);
+      leftoversFromMap.delete(key);
+    } else {
+      missingKeys.push(key);
+    }
+  }
+
+  return [leftoversFromMap, intersected, missingKeys];
+}

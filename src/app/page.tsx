@@ -1,79 +1,111 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { Check, ArrowLeft, Trophy, Star } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import Link from "next/link";
-import {
-  Option,
-  Option_some,
-  Option_none,
-  Option_isSome,
-  strToNonNegativeNumberOrUndefined_strict,
-  ValidNonNegativeNumber,
-  numberToValidPercentOrUndefined,
-} from "../fp";
 import { JobState } from "../types";
-import { createJobAction, getJobAction } from "./actions";
+import { createClient } from "@/supabase/client";
+import * as v from "valibot";
+import { number_toValidPercent_unsafe } from "@/utils/toNumber/validPercent";
+import {
+  Option_none,
+  Option_some,
+  Option_isSome,
+  type Option,
+} from "@/utils/types";
+import {
+  nonEmptyString_afterTrim,
+  String_toNonEmptyStringTrimmed_unsafe,
+} from "@/utils/non-empty-string-trimmed";
+import { NonEmptyStringTrimmedSchema } from "@/utils/non-empty-string-trimmed-valibot";
+import { ValidPercentSchema } from "@/utils/toNumber/validPercent-valibot";
+
+const CreateJobResponseSchema = v.object({
+  id: NonEmptyStringTrimmedSchema,
+});
+
+const JobStateResponseSchema = v.union([
+  v.object({ t: v.literal("idle") }),
+  v.object({ t: v.literal("queued") }),
+  v.object({ t: v.literal("processing"), progress: ValidPercentSchema }),
+  v.object({ t: v.literal("done"), result: NonEmptyStringTrimmedSchema }),
+  v.object({ t: v.literal("failed"), error: NonEmptyStringTrimmedSchema }),
+  v.object({ error: NonEmptyStringTrimmedSchema }),
+]);
+
+const PayloadNewSchema = v.object({
+  status: NonEmptyStringTrimmedSchema,
+  result: v.nullable(v.optional(NonEmptyStringTrimmedSchema)),
+  progress: v.nullable(v.optional(ValidPercentSchema)),
+});
+
+type Unit = "kg" | "lbs";
 
 export default function App() {
   const [step, setStep] = useState(1);
   const [wish, setWish] = useState<Option<string>>(Option_none);
-  const [numberInput, setNumberInput] = useState<string>("");
+  const [unit, setUnit] = useState<Unit>("kg");
+  const [currentWeight, setCurrentWeight] = useState<string>("");
+  const [goalWeight, setGoalWeight] = useState<string>("");
 
-  const handleNext = () => setStep((s) => s + 1);
+  const handleNext = () => {
+    if (step === 2) {
+      const cur = parseFloat(currentWeight);
+      if (!isNaN(cur)) {
+        const minLimit = unit === "kg" ? 10 : 22;
+        const prefilled = Math.max(cur * 0.95, minLimit).toFixed(1);
+        setGoalWeight(prefilled);
+      }
+    }
+    setStep((s) => s + 1);
+  };
+  const handleBack = () => setStep((s) => Math.max(1, s - 1));
   const handleReset = () => {
     setStep(1);
     setWish(Option_none);
-    setNumberInput("");
+    setCurrentWeight("");
+    setGoalWeight("");
   };
+
+  const totalSteps = 4;
+  const progressPercent = (step / totalSteps) * 100;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
-      {/* Top Progress Bar */}
-      <div className="w-full bg-white fixed top-0 h-16 flex items-center justify-between border-b border-slate-100 z-10 px-4">
-        <Link
-          href="/jobs"
-          className="text-sm font-semibold text-emerald-500 hover:text-emerald-600 px-4 hidden sm:block"
-        >
-          All Jobs Dashboard
-        </Link>
-        <div className="w-full max-w-2xl flex items-center gap-4 flex-1 mx-auto">
-          <button
-            onClick={() => setStep((s) => Math.max(1, s - 1))}
-            className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
-            disabled={step === 1}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
+      {/* Top Header & Progress Bar */}
+      <div className="w-full bg-white fixed top-0 z-20">
+        <div className="h-14 flex items-center px-4 max-w-2xl mx-auto w-full relative">
+          {step > 1 && step < 4 && (
+            <button
+              onClick={handleBack}
+              className="p-2 -ml-2 text-slate-500 hover:text-slate-800 transition-colors"
+              aria-label="Go back"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
-          </button>
-          <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-            <motion.div
-              className="h-full bg-emerald-400"
-              initial={{ width: "33%" }}
-              animate={{ width: `${(step / 3) * 100}%` }}
-              transition={{ duration: 0.3 }}
-            />
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
+          <div className="flex-1 text-center">
+            <Link
+              href="/jobs"
+              className="text-xs font-bold text-emerald-500 hover:text-emerald-600 uppercase tracking-widest"
+            >
+              Dashboard
+            </Link>
           </div>
         </div>
-        <div className="w-[140px] hidden sm:block" />
+        <div className="w-full h-1 bg-slate-100">
+          <motion.div
+            className="h-full bg-emerald-500"
+            initial={{ width: 0 }}
+            animate={{ width: `${progressPercent}%` }}
+            transition={{ duration: 0.3 }}
+          />
+        </div>
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-2xl mx-auto pt-20 px-4 pb-10">
+      <main className="flex-1 flex flex-col items-center justify-center w-full max-w-2xl mx-auto pt-20 px-4 pb-20">
         <AnimatePresence mode="wait">
           {step === 1 && (
             <Screen1
@@ -84,22 +116,41 @@ export default function App() {
             />
           )}
           {step === 2 && (
-            <Screen2
+            <WeightSelection
               key="s2"
-              numberInput={numberInput}
-              setNumberInput={setNumberInput}
+              type="current"
+              value={currentWeight}
+              setValue={setCurrentWeight}
+              unit={unit}
+              setUnit={setUnit}
               onNext={handleNext}
             />
           )}
-          {step === 3 && <Screen3 key="s3" onReset={handleReset} />}
+          {step === 3 && (
+            <WeightSelection
+              key="s3"
+              type="goal"
+              value={goalWeight}
+              setValue={setGoalWeight}
+              unit={unit}
+              setUnit={setUnit}
+              onNext={handleNext}
+            />
+          )}
+          {step === 4 && <Screen4 key="s4" onReset={handleReset} />}
         </AnimatePresence>
-      </div>
+      </main>
     </div>
   );
 }
 
-// --- Screen 1 ---
-function Screen1({ wish, setWish, onNext }: any) {
+// --- Screen 1: Wish Selection ---
+interface Screen1Props {
+  wish: Option<string>;
+  setWish: (w: Option<string>) => void;
+  onNext: () => void;
+}
+function Screen1({ wish, setWish, onNext }: Screen1Props) {
   const wishes = [
     { id: "w1", icon: "😌", text: "Reduce Stress" },
     { id: "w2", icon: "😴", text: "Better Sleep" },
@@ -109,91 +160,40 @@ function Screen1({ wish, setWish, onNext }: any) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      className="w-full flex justify-center"
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      className="w-full max-w-md"
     >
-      <div className="w-full max-w-md">
-        <h1 className="text-3xl font-medium text-center mb-8">
-          What is your main wish?
-        </h1>
-        <div className="flex flex-col gap-3 mb-10">
-          {wishes.map((w) => (
-            <button
-              key={w.id}
-              onClick={() => setWish(Option_some(w.id))}
-              className={`flex items-center gap-3 p-4 rounded-xl border-2 transition-all ${
-                Option_isSome(wish) && wish.v === w.id
-                  ? "border-emerald-400 bg-emerald-50/50"
-                  : "border-transparent bg-white shadow-sm hover:border-slate-200"
-              }`}
-            >
-              <span className="text-xl">{w.icon}</span>
-              <span className="text-lg font-medium">{w.text}</span>
-              {Option_isSome(wish) && wish.v === w.id && (
-                <Check className="ml-auto text-emerald-500 w-5 h-5" />
-              )}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex justify-center">
+      <h1 className="text-3xl font-bold text-center mb-10 text-slate-900">
+        What is your main wish?
+      </h1>
+      <div className="flex flex-col gap-3 mb-10">
+        {wishes.map((w) => (
           <button
-            onClick={onNext}
-            disabled={!Option_isSome(wish)}
-            className="w-48 py-3 rounded-full bg-emerald-400 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-500 transition-colors"
+            key={w.id}
+            onClick={() => setWish(Option_some(w.id))}
+            className={`flex items-center gap-4 p-5 rounded-2xl border-2 transition-all duration-200 ${Option_isSome(wish) && wish.v === w.id
+                ? "border-emerald-500 bg-white shadow-md"
+                : "border-transparent bg-white shadow-sm hover:border-slate-200"
+              }`}
           >
-            Continue
+            <span className="text-2xl">{w.icon}</span>
+            <span className="text-lg font-semibold">{w.text}</span>
+            {Option_isSome(wish) && wish.v === w.id && (
+              <div className="ml-auto bg-emerald-500 rounded-full p-1">
+                <Check className="text-white w-4 h-4" strokeWidth={3} />
+              </div>
+            )}
           </button>
-        </div>
+        ))}
       </div>
-    </motion.div>
-  );
-}
 
-// --- Screen 2 ---
-function Screen2({ numberInput, setNumberInput, onNext }: any) {
-  const validNumberOption: Option<ValidNonNegativeNumber> = (() => {
-    const parsed = strToNonNegativeNumberOrUndefined_strict(numberInput);
-    if (parsed !== undefined && parsed > 0) {
-      return Option_some(parsed);
-    }
-    return Option_none;
-  })();
-
-  const isValid = Option_isSome(validNumberOption);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      className="w-full flex justify-center"
-    >
-      <div className="w-full max-w-md text-center">
-        <h1 className="text-3xl font-medium mb-12">What is your target?</h1>
-
-        <div className="mb-12">
-          <div className="flex items-end justify-center gap-2 mb-2">
-            <input
-              type="number"
-              value={numberInput}
-              onChange={(e) => setNumberInput(e.target.value)}
-              placeholder="0"
-              className="text-5xl font-light w-24 text-center pb-2 border-b-2 border-slate-200 focus:outline-none focus:border-emerald-400 bg-transparent transition-colors"
-            />
-            <span className="text-2xl font-medium pb-3">kg</span>
-          </div>
-          <p className="text-xs text-slate-400 font-medium tracking-wide">
-            Please enter a value greater than 0
-          </p>
-        </div>
-
+      <div className="flex justify-center">
         <button
           onClick={onNext}
-          disabled={!isValid}
-          className="w-48 py-3 rounded-full bg-emerald-400 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-500 transition-colors"
+          disabled={!Option_isSome(wish)}
+          className="w-full py-4 rounded-full bg-emerald-500 text-white font-bold text-lg shadow-lg shadow-emerald-200 disabled:bg-emerald-200 disabled:shadow-none hover:bg-emerald-600 transition-all transform active:scale-95"
         >
           Continue
         </button>
@@ -202,200 +202,345 @@ function Screen2({ numberInput, setNumberInput, onNext }: any) {
   );
 }
 
-// --- Screen 3 ---
-function Screen3({ onReset }: { onReset: () => void; key?: string }) {
-  const [jobState, setJobState] = useState<JobState>({ t: "idle" });
-  const [mode, setMode] = useState<"stream" | "polling" | null>(null);
+// --- Shared: Weight Selection ---
+interface WeightSelectionProps {
+  type: "current" | "goal";
+  value: string;
+  setValue: (v: string) => void;
+  unit: Unit;
+  setUnit: (u: Unit) => void;
+  onNext: () => void;
+}
+function WeightSelection({
+  type,
+  value,
+  setValue,
+  unit,
+  setUnit,
+  onNext,
+}: WeightSelectionProps) {
+  const limits = useMemo(
+    () => (unit === "kg" ? { min: 10, max: 200 } : { min: 22, max: 485 }),
+    [unit],
+  );
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const startStreamProcess = async () => {
-    setMode("stream");
-    setJobState({ t: "queued" });
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
 
-    try {
-      const id = await createJobAction();
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const step = 1;
+      const cur = parseFloat(value);
+      let next: number;
 
-      const evtSource = new EventSource("/api/job-stream?id=" + id);
-      evtSource.onmessage = (event) => {
-        const row = JSON.parse(event.data);
-        if (row.status === "processing") {
-          setJobState({
-            t: "processing",
-            progress:
-              numberToValidPercentOrUndefined(row.progress) || (0 as any),
-          });
-        } else if (row.status === "done") {
-          setJobState({ t: "done", result: row.result });
-          evtSource.close();
-        } else if (row.status === "failed") {
-          setJobState({ t: "failed", error: row.result || "Unknown error" });
-          evtSource.close();
-        }
-      };
+      if (isNaN(cur)) {
+        next = limits.min;
+      } else {
+        next = e.deltaY < 0 ? cur + step : cur - step;
+      }
 
-      evtSource.onerror = () => {
-        evtSource.close();
-      };
-    } catch (e) {
-      console.error(e);
-      setJobState({ t: "failed", error: "Failed to start processing" });
-    }
-  };
+      const clamped = Math.max(limits.min, Math.min(limits.max, next));
+      setValue(clamped % 1 === 0 ? clamped.toString() : clamped.toFixed(1));
+    };
 
-  const startPollingProcess = async () => {
-    setMode("polling");
-    setJobState({ t: "queued" });
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [value, limits, setValue]);
 
-    try {
-      const id = await createJobAction();
+  const numValue = parseFloat(value);
+  const isValid =
+    !isNaN(numValue) && numValue >= limits.min && numValue <= limits.max;
+  const isError = value !== "" && !isValid;
 
-      const interval = setInterval(async () => {
-        const state = await getJobAction(id);
-        if (state) {
-          setJobState(state);
-          if (state.t === "done" || state.t === "failed") {
-            clearInterval(interval);
-          }
-        }
-      }, 1000);
-    } catch (e) {
-      console.error(e);
-      setJobState({ t: "failed", error: "Failed to start polling" });
-    }
-  };
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      className="w-full max-w-md flex flex-col items-center"
+    >
+      <h1 className="text-3xl font-bold text-center mb-8 text-slate-900 leading-tight">
+        What is your{" "}
+        {type === "goal" && <span className="text-emerald-500">goal</span>}{" "}
+        weight?
+      </h1>
 
-  if (jobState.t !== "idle") {
-    const isDone = jobState.t === "done" || jobState.t === "failed";
-    const inProgress = jobState.t === "queued" || jobState.t === "processing";
+      {/* Unit Toggle */}
+      <div className="bg-slate-200/50 p-1 rounded-full flex mb-12 w-32">
+        {(["lbs", "kg"] as const).map((u) => (
+          <button
+            key={u}
+            onClick={() => setUnit(u)}
+            className={`flex-1 py-1.5 rounded-full text-sm font-bold transition-all ${unit === u
+                ? "bg-emerald-500 text-white shadow-sm"
+                : "text-slate-500"
+              }`}
+          >
+            {u}
+          </button>
+        ))}
+      </div>
 
-    return (
-      <div className="w-full max-w-md text-center flex flex-col items-center justify-center min-h-[40vh]">
-        {inProgress && (
-          <div className="relative w-40 h-40 mb-8 flex items-center justify-center">
-            {jobState.t === "processing" && mode === "stream" ? (
-              <>
-                <svg
-                  className="w-full h-full transform -rotate-90"
-                  viewBox="0 0 100 100"
-                >
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="45"
-                    fill="none"
-                    stroke="#f1f5f9"
-                    strokeWidth="8"
-                  />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="45"
-                    fill="none"
-                    stroke="#34d399"
-                    strokeWidth="8"
-                    strokeDasharray="283"
-                    strokeDashoffset={283 - (283 * jobState.progress) / 100}
-                    className="transition-all duration-500 ease-out"
-                  />
-                </svg>
-                <div className="absolute text-3xl font-medium text-emerald-500">
-                  {jobState.progress}%
-                </div>
-              </>
-            ) : (
-              <>
-                <Loader2 className="w-full h-full text-emerald-400 animate-spin opacity-50" />
-                <div className="absolute text-sm font-medium animate-pulse text-emerald-600 border border-emerald-200 bg-emerald-50 px-3 py-1 rounded-full">
-                  Processing
-                </div>
-              </>
-            )}
+      {/* Large Input */}
+      <div className="mb-10 w-full flex flex-col items-center">
+        <div className="flex items-baseline justify-center gap-3 border-b-2 border-slate-200 focus-within:border-emerald-500 transition-colors px-4 pb-2 group">
+          <input
+            ref={inputRef}
+            type="number"
+            min="0"
+            onKeyDown={(e) => {
+              if (e.key === "-" || e.key === "e" || e.key === "E") {
+                e.preventDefault();
+              }
+            }}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={`Weight ${unit}`}
+            className="text-6xl font-light w-44 text-center focus:outline-none bg-transparent placeholder:text-slate-200 placeholder:text-3xl [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+          <span className="text-3xl font-medium text-slate-400 group-focus-within:text-emerald-500 transition-colors">
+            {unit}
+          </span>
+        </div>
+        <p
+          className={`mt-4 text-sm font-medium ${isError ? "text-red-500" : "text-slate-400"}`}
+        >
+          Please enter a value{" "}
+          {unit === "kg"
+            ? "from 10 kg to 200 kg"
+            : `between ${limits.min} lbs and ${limits.max} lbs`}
+        </p>
+      </div>
+
+      {/* Callout Box (Goal variant only) */}
+      {type === "goal" && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 mb-10 flex flex-col items-center text-center shadow-sm">
+          <div className="bg-emerald-100 p-3 rounded-full mb-4">
+            <Trophy className="w-6 h-6 text-emerald-600" />
           </div>
-        )}
+          <p className="text-slate-600 text-sm leading-relaxed">
+            <span className="font-bold text-slate-900">
+              Goal: Lose 5% of your weight.
+            </span>{" "}
+            Even small, steady changes can make a meaningful difference. We’ll
+            support you with a balanced plan to help you feel lighter,
+            healthier, and more confident over time.
+          </p>
+        </div>
+      )}
 
+      <button
+        onClick={onNext}
+        disabled={!isValid}
+        className="w-full py-4 rounded-full bg-emerald-500 text-white font-bold text-lg shadow-lg shadow-emerald-200 disabled:bg-emerald-100 disabled:text-emerald-300 disabled:shadow-none hover:bg-emerald-600 transition-all transform active:scale-95 mt-auto"
+      >
+        Continue
+      </button>
+    </motion.div>
+  );
+}
+
+// --- Screen 4: Processing / Result ---
+function Screen4({ onReset }: { onReset: () => void }) {
+  const [jobState, setJobState] = useState<JobState>({ t: "queued" });
+
+  const startProcess = async () => {
+    try {
+      const res = await fetch("/api/jobs", { method: "POST" });
+      const rawData = await res.json();
+      const data = v.parse(CreateJobResponseSchema, rawData);
+      const id = data.id;
+
+      const supabase = createClient();
+      const initialRes = await fetch(`/api/jobs/${id}`);
+      const rawInitialState = await initialRes.json();
+      const initialState = v.parse(JobStateResponseSchema, rawInitialState);
+      if (!("error" in initialState)) {
+        setJobState(initialState as JobState);
+      }
+
+      const channel = supabase
+        .channel(`job-${id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "jobs",
+            filter: `id=eq.${id}`,
+          },
+          (payload) => {
+            const parsed = v.safeParse(PayloadNewSchema, payload.new);
+            if (parsed.success) {
+              const row = parsed.output;
+              let newState: JobState;
+              if (row.status === "done") {
+                newState = {
+                  t: "done",
+                  result: nonEmptyString_afterTrim(row.result || "Success"),
+                };
+              } else if (row.status === "failed") {
+                newState = {
+                  t: "failed",
+                  error:
+                    String_toNonEmptyStringTrimmed_unsafe("Processing failed"),
+                };
+              } else if (row.status === "processing") {
+                newState = {
+                  t: "processing",
+                  progress: number_toValidPercent_unsafe(row.progress || 0),
+                };
+              } else {
+                newState = { t: "queued" };
+              }
+              setJobState(newState);
+              if (row.status === "done" || row.status === "failed") {
+                supabase.removeChannel(channel);
+              }
+            }
+          },
+        )
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR") {
+            setJobState({
+              t: "failed",
+              error: String_toNonEmptyStringTrimmed_unsafe(
+                "WebSocket connection failed",
+              ),
+            });
+          }
+        });
+    } catch {
+      setJobState({
+        t: "failed",
+        error: String_toNonEmptyStringTrimmed_unsafe(
+          "Failed to start processing",
+        ),
+      });
+    }
+  };
+
+  useEffect(() => {
+    startProcess();
+  }, []);
+
+  const isDone = jobState.t === "done" || jobState.t === "failed";
+  const inProgress = jobState.t === "queued" || jobState.t === "processing";
+
+  return (
+    <div className="w-full flex flex-col items-center">
+      <div className="w-full max-w-md flex flex-col items-center text-center">
         {inProgress && (
-          <div>
-            <h2 className="text-xl font-medium mb-2">
-              {jobState.t === "queued"
-                ? "Preparing..."
-                : "Creating something good for you..."}
+          <div className="flex flex-col items-center w-full">
+            {/* Circular Progress */}
+            <div className="relative w-56 h-56 mb-12 flex items-center justify-center">
+              <svg
+                className="w-full h-full transform -rotate-90"
+                viewBox="0 0 100 100"
+              >
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="44"
+                  fill="none"
+                  stroke="#f1f5f9"
+                  strokeWidth="10"
+                />
+                <motion.circle
+                  cx="50"
+                  cy="50"
+                  r="44"
+                  fill="none"
+                  stroke="#10b981"
+                  strokeWidth="10"
+                  strokeDasharray="276.46"
+                  initial={{ strokeDashoffset: 276.46 }}
+                  animate={{
+                    strokeDashoffset:
+                      276.46 -
+                      (276.46 *
+                        (jobState.t === "processing" ? jobState.progress : 0)) /
+                      100,
+                  }}
+                  transition={{ duration: 0.5, ease: "easeOut" }}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <div className="absolute flex flex-col items-center">
+                <span className="text-5xl font-black text-slate-900">
+                  {jobState.t === "processing" ? jobState.progress : 0}%
+                </span>
+              </div>
+            </div>
+
+            <h2 className="text-2xl font-bold mb-3 text-slate-900">
+              Creating something good for you...
             </h2>
-            <p className="text-sm text-slate-500">
+            <p className="text-slate-500 mb-16">
               This will only take a moment — your item is almost ready.
             </p>
+
+            {/* Testimonial Box */}
+            <div className="w-full bg-emerald-50 rounded-3xl p-8 relative mt-auto">
+              <div className="flex gap-1 mb-4">
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <Star
+                    key={s}
+                    className="w-5 h-5 fill-yellow-400 text-yellow-400"
+                  />
+                ))}
+              </div>
+              <p className="text-slate-700 italic text-lg mb-4 leading-relaxed">
+                &quot;I love this website! It makes practicing so easy and
+                relaxing.&quot;
+              </p>
+              <div className="text-right">
+                <span className="text-sm font-bold text-slate-400 uppercase tracking-widest">
+                  — John
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
         {isDone && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
+            initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="w-full"
           >
             <div
-              className={`p-6 rounded-2xl mb-8 ${jobState.t === "done" ? "bg-emerald-50 border border-emerald-100 text-emerald-800" : "bg-red-50 border border-red-100 text-red-800"}`}
+              className={`p-8 rounded-3xl mb-10 ${jobState.t === "done"
+                  ? "bg-emerald-50 border-2 border-emerald-100 text-emerald-900"
+                  : "bg-red-50 border-2 border-red-100 text-red-900"
+                }`}
             >
-              <h2 className="text-2xl font-semibold mb-2">
-                {jobState.t === "done" ? "Process Complete" : "Process Failed"}
+              <div className="flex justify-center mb-4">
+                {jobState.t === "done" ? (
+                  <Trophy className="w-12 h-12 text-emerald-500" />
+                ) : (
+                  <div className="text-4xl">❌</div>
+                )}
+              </div>
+              <h2 className="text-3xl font-black mb-3">
+                {jobState.t === "done" ? "Success!" : "Failed"}
               </h2>
-              <p className="text-sm opacity-80">
+              <p className="text-lg opacity-80 leading-relaxed font-medium">
                 {jobState.t === "done" ? jobState.result : jobState.error}
               </p>
             </div>
 
             <button
               onClick={onReset}
-              className="px-8 py-3 rounded-full border-2 border-slate-200 text-slate-600 font-semibold hover:border-slate-300 hover:bg-slate-50 transition-colors"
+              className="w-full py-4 rounded-full border-2 border-slate-200 text-slate-600 font-bold text-lg hover:bg-white hover:border-slate-300 transition-all active:scale-95"
             >
               Start Over
             </button>
           </motion.div>
         )}
       </div>
-    );
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      className="w-full max-w-md text-center"
-    >
-      <h1 className="text-3xl font-medium mb-10">Select Processing Mode</h1>
-
-      <div className="flex flex-col gap-4 mb-10">
-        <button
-          onClick={startStreamProcess}
-          className="flex flex-col items-start p-6 rounded-2xl border-2 border-transparent bg-white shadow-sm hover:shadow-md hover:border-emerald-200 transition-all text-left"
-        >
-          <span className="text-lg font-semibold text-slate-800 mb-1">
-            Start via HTTP Real-time Stream (SSE)
-          </span>
-          <span className="text-sm text-slate-500">
-            Native Next.js alternative to WebSockets. Real-time progress
-            (0-100%)
-          </span>
-        </button>
-
-        <button
-          onClick={startPollingProcess}
-          className="flex flex-col items-start p-6 rounded-2xl border-2 border-transparent bg-white shadow-sm hover:shadow-md hover:border-emerald-200 transition-all text-left"
-        >
-          <span className="text-lg font-semibold text-slate-800 mb-1">
-            Start via Server Action Polling
-          </span>
-          <span className="text-sm text-slate-500">
-            Standard polling mechanism with indeterminate loader
-          </span>
-        </button>
-      </div>
-
-      <button
-        onClick={onReset}
-        className="text-slate-400 font-medium hover:text-slate-600 underline underline-offset-4"
-      >
-        Go back to beginning
-      </button>
-    </motion.div>
+    </div>
   );
 }

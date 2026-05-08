@@ -1,0 +1,141 @@
+import {
+  Array_groupBy_intoMap,
+  Array_groupBy_intoRecord,
+  Array_groupByKeys,
+} from "./array";
+import type { NonEmptyMap } from "./non-empty-map";
+import type { NonEmptyRecord } from "./non-empty-record";
+import { Set_toNonEmptySet_orThrow, type NonEmptySet } from "./non-empty-set";
+import { sortBy_immutable } from "./sort";
+import { identityFn, Option_none, Option_some, type Option } from "./types";
+
+// export type NonEmptyArray<T> = T[] & { readonly __NonEmptyArrayBrand: 'NonEmptyArray' }
+export type NonEmptyArray<T> = readonly [T, ...(readonly T[])];
+
+export function Array_toNonEmptyArrayOrNone<T>(
+  arr: readonly T[],
+): Option<NonEmptyArray<T>> {
+  if (arr.length === 0) return Option_none;
+  return Option_some(arr as NonEmptyArray<T>);
+}
+
+export function Array_toNonEmptyArray_orUndefined<T>(
+  arr: readonly T[],
+): NonEmptyArray<T> | undefined {
+  if (arr.length === 0) return undefined;
+  return arr as NonEmptyArray<T>;
+}
+
+export const Array_toNonEmptyArray_unsafe = identityFn as <T>(
+  arr: readonly T[],
+) => NonEmptyArray<T>;
+
+export function Array_toNonEmptyArray_orThrow<T>(
+  arr: readonly T[],
+): NonEmptyArray<T> {
+  Array_assertNonEmptyArray(arr);
+  return arr;
+}
+
+export function Array_isNonEmptyArray<T>(
+  arr: readonly T[],
+): arr is NonEmptyArray<T> {
+  return arr.length !== 0;
+}
+
+export function Array_assertNonEmptyArray<T>(
+  arr: readonly T[],
+): asserts arr is NonEmptyArray<T> {
+  if (arr.length === 0) throw new Error("array should be non-empty");
+}
+
+export function Array_elementsMaybeUndefined_ifAllNonUndefined_toNonEmptyArray_orUndefined<
+  T,
+>(arr: readonly (T | null | undefined)[]): NonEmptyArray<T> | undefined {
+  if (arr.some((e) => e === undefined || e === null)) return undefined;
+  if (arr.length === 0) return undefined;
+  return arr as NonEmptyArray<T>;
+}
+
+export function Array_elementsMaybeUndefined_ifAllNonUndefined_assertNonEmptyArray<
+  T,
+>(arr: readonly (T | null | undefined)[]): asserts arr is NonEmptyArray<T> {
+  const arr_ =
+    Array_elementsMaybeUndefined_ifAllNonUndefined_toNonEmptyArray_orUndefined(
+      arr,
+    );
+  if (arr_ === undefined)
+    throw new Error(
+      "array should be non-empty and all elements should not undefined or null",
+    );
+}
+
+export const NonEmptyArray_sortBy_immutable = sortBy_immutable as unknown as <
+  A,
+  B,
+>(
+  items: NonEmptyArray<A>,
+  byF: (a: A) => B,
+  sorter: (a: B, b: B) => number,
+) => NonEmptyArray<A>;
+
+/**
+ * Finds words in the queue that are missing from the descriptions record.
+ */
+export function NonEmptyArray_collectToSet<A, B>(
+  queue: NonEmptyArray<A>,
+  f: (a: A) => B,
+): NonEmptySet<B> {
+  const s = new Set<B>();
+  for (const item of queue) s.add(f(item));
+  return Set_toNonEmptySet_orThrow(s);
+}
+
+export const NonEmptyArray_groupBy_intoRecord: <
+  A,
+  B extends string | number | symbol,
+>(
+  arr: NonEmptyArray<A>,
+  f: (a: A) => B,
+) => NonEmptyRecord<B, NonEmptyArray<A>> =
+  Array_groupBy_intoRecord as unknown as <
+    A,
+    B extends string | number | symbol,
+  >(
+    arr: NonEmptyArray<A>,
+    f: (a: A) => B,
+  ) => NonEmptyRecord<B, NonEmptyArray<A>>;
+
+export const NonEmptyArray_groupBy_intoMap: <
+  A,
+  B extends string | number | symbol,
+>(
+  arr: NonEmptyArray<A>,
+  f: (a: A) => B,
+) => NonEmptyMap<B, NonEmptyArray<A>> = Array_groupBy_intoMap as unknown as <
+  A,
+  B extends string | number | symbol,
+>(
+  arr: NonEmptyArray<A>,
+  f: (a: A) => B,
+) => NonEmptyMap<B, NonEmptyArray<A>>;
+
+export function recordOfArrays_mapValues_to_nonEmptyArrayOrUndefined_mutating<
+  K extends string | number | symbol,
+  V,
+>(record: Record<K, readonly V[]>): Partial<Record<K, NonEmptyArray<V>>> {
+  for (const key of Object.keys(record) as K[]) {
+    if (Array_isNonEmptyArray(record[key])) continue;
+    delete record[key]; // NOTE: here we dont mix { [K]?: ... } with { [K]: undefined }
+  }
+  return record as Partial<Record<K, NonEmptyArray<V>>>;
+}
+
+export function Array_groupByKeys_toNonEmptyArrays<V, K extends string>(
+  xs: readonly V[],
+  getKey: (v: V) => K,
+): Partial<Record<K, NonEmptyArray<V>>> {
+  return recordOfArrays_mapValues_to_nonEmptyArrayOrUndefined_mutating(
+    Array_groupByKeys(xs, getKey) as unknown as Record<K, readonly V[]>,
+  );
+}

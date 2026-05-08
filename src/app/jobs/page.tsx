@@ -1,20 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getAllJobsAction } from "../actions";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 
+import * as v from "valibot";
+import { NonEmptyStringTrimmedSchema } from "@/utils/non-empty-string-trimmed-valibot";
+import { ValidPercentSchema } from "@/utils/toNumber/validPercent-valibot";
+
+const JobRowSchema = v.object({
+  id: NonEmptyStringTrimmedSchema,
+  status: NonEmptyStringTrimmedSchema,
+  progress: v.nullable(v.optional(ValidPercentSchema)),
+  createdAt: v.string(),
+  result: v.nullable(v.optional(NonEmptyStringTrimmedSchema)),
+});
+
+type JobRow = v.InferOutput<typeof JobRowSchema>;
+
+const JobsResponseSchema = v.union([
+  v.array(JobRowSchema),
+  v.object({ error: NonEmptyStringTrimmedSchema }),
+]);
+
 export default function JobsPage() {
-  const [jobs, setJobs] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<JobRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let interval: any;
     const loadJobs = async () => {
       try {
-        const data = await getAllJobsAction();
-        setJobs(data);
+        const response = await fetch("/api/jobs");
+        const rawData = await response.json();
+        const data = v.parse(JobsResponseSchema, rawData);
+        if (!("error" in data)) {
+          setJobs(data);
+        }
       } catch (e) {
         console.error(e);
       } finally {
@@ -25,7 +46,7 @@ export default function JobsPage() {
     loadJobs();
 
     // Poll for new jobs
-    interval = setInterval(loadJobs, 2000);
+    const interval = setInterval(loadJobs, 2000);
 
     return () => clearInterval(interval);
   }, []);
@@ -81,7 +102,9 @@ export default function JobsPage() {
                         {job.status}
                       </span>
                     </td>
-                    <td className="p-4 text-sm font-medium">{job.progress}%</td>
+                    <td className="p-4 text-sm font-medium">
+                      {job.progress != null ? `${job.progress}%` : "-"}
+                    </td>
                     <td className="p-4 text-sm text-slate-500">
                       {new Date(job.createdAt).toLocaleString()}
                     </td>
